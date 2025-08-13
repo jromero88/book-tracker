@@ -1,1 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My Book Tracker</title>
+  <!-- TailwindCSS CDN for quick styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Fallback progress bar if Tailwind isn't available */
+    .progress { height: 0.5rem; background: #e5e7eb; border-radius: 9999px; }
+    .progress > div { height: 100%; background: #60a5fa; border-radius: 9999px; }
+    /* Simple dialog polyfill-ish styles */
+    dialog::backdrop { background: rgba(0,0,0,.35); }
+    dialog { border: 0; border-radius: 1rem; padding: 0; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div class="max-w-7xl mx-auto p-4 sm:p-8">
+    <header class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
+      <div>
+        <h1 class="text-3xl font-semibold tracking-tight">📚 Book Tracker</h1>
+        <p class="text-slate-500">A Notion‑style tracker you can host on GitHub Pages. Data is saved to your browser (localStorage) and exportable as JSON.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="addBtn" class="px-3 py-2 rounded-xl bg-blue-600 text-white shadow hover:bg-blue-700">Add book</button>
+        <button id="exportBtn" class="px-3 py-2 rounded-xl bg-slate-800 text-white shadow hover:bg-black">Export JSON</button>
+        <label class="px-3 py-2 rounded-xl bg-white border shadow cursor-pointer">
+          Import JSON
+          <input id="importInput" type="file" accept="application/json" class="hidden" />
+        </label>
+        <button id="resetBtn" class="px-3 py-2 rounded-xl bg-white border shadow hover:bg-red-50">Reset demo data</button>
+      </div>
+    </header>
+
+    <!-- Controls -->
+    <section class="mb-4 grid grid-cols-1 md:grid-cols-12 gap-3">
+      <div class="md:col-span-5">
+        <label class="block text-sm font-medium text-slate-600">Search</label>
+        <input id="search" type="text" placeholder="Title, author, tag…" class="mt-1 w-full rounded-xl border p-2 bg-white shadow-sm" />
+      </div>
+      <div class="md:col-span-2">
+        <label class="block text-sm font-medium text-slate-600">Status</label>
+        <select id="statusFilter" class="mt-1 w-full rounded-xl border p-2 bg-white shadow-sm">
+          <option value="">All</option>
+          <option>To Read</option>
+          <option>Reading</option>
+          <option>Completed</option>
+          <option>On Hold</option>
+          <option>DNF</option>
+        </select>
+      </div>
+      <div class="md:col-span-3">
+        <label class="block text-sm font-medium text-slate-600">Tag / Genre</label>
+        <select id="tagFilter" class="mt-1 w-full rounded-xl border p-2 bg-white shadow-sm">
+          <option value="">All</option>
+        </select>
+      </div>
+      <div class="md:col-span-2">
+        <label class="block text-sm font-medium text-slate-600">Sort</label>
+        <select id="sortBy" class="mt-1 w-full rounded-xl border p-2 bg-white shadow-sm">
+          <option value="-updatedAt">Recently updated</option>
+          <option value="title">Title (A→Z)</option>
+          <option value="author">Author (A→Z)</option>
+          <option value="-rating">Rating (high→low)</option>
+          <option value="-percentRead">Progress (high→low)</option>
+          <option value="pages">Pages (low→high)</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- Table -->
+    <div class="overflow-auto rounded-2xl border bg-white shadow-sm">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-100 text-slate-700">
+          <tr>
+            <th class="text-left p-3 font-semibold">Title</th>
+            <th class="text-left p-3 font-semibold">Author</th>
+            <th class="text-left p-3 font-semibold">Status</th>
+            <th class="text-left p-3 font-semibold">Rating</th>
+            <th class="text-left p-3 font-semibold">Pages</th>
+            <th class="text-left p-3 font-semibold">Progress</th>
+            <th class="text-left p-3 font-semibold">Tags</th>
+            <th class="text-left p-3 font-semibold"></th>
+          </tr>
+        </thead>
+        <tbody id="rows" class="divide-y"></tbody>
+      </table>
+    </div>
+
+    <p id="emptyState" class="hidden text-center text-slate-500 py-10">No books match your filters.</p>
+  </div>
+
+  <!-- Add/Edit Dialog -->
+  <dialog id="bookDialog" class="w-full max-w-2xl">
+    <form id="bookForm" method="dialog" class="bg-white rounded-2xl p-6 shadow-xl">
+      <div class="flex items-start justify-between mb-4">
+        <h2 id="dialogTitle" class="text-xl font-semibold">Add book</h2>
+        <button type="button" id="closeDialog" class="text-slate-500 hover:text-slate-800">✕</button>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium">Title</label>
+          <input name="title" required class="mt-1 w-full rounded-xl border p-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Author</label>
+          <input name="author" class="mt-1 w-full rounded-xl border p-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Status</label>
+          <select name="status" class="mt-1 w-full rounded-xl border p-2">
+            <option>To Read</option>
+            <option>Reading</option>
+            <option>Completed</option>
+            <option>On Hold</option>
+            <option>DNF</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Rating (0–5)</label>
+          <input name="rating" type="number" min="0" max="5" step="0.5" class="mt-1 w-full rounded-xl border p-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Pages</label>
+          <input name="pages" type="number" min="0" class="mt-1 w-full rounded-xl border p-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Percent read (0–100)</label>
+          <input name="percentRead" type="number" min="0" max="100" class="mt-1 w-full rounded-xl border p-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Start date</label>
+          <input name="dateStarted" type="date" class="mt-1 w-full rounded-xl border p-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Finish date</label>
+          <input name="dateFinished" type="date" class="mt-1 w-full rounded-xl border p-2" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium">Tags (comma‑separated)</label>
+          <input name="tags" class="mt-1 w-full rounded-xl border p-2" placeholder="romantasy, audiobook, 2025" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium">Notes</label>
+          <textarea name="notes" rows="3" class="mt-1 w-full rounded-xl border p-2" placeholder="Favorite quotes, thoughts, tropes…"></textarea>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between mt-6">
+        <button type="button" id="deleteBtn" class="hidden px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700">Delete</button>
+        <div class="ml-auto flex gap-2">
+          <button type="button" id="cancelBtn" class="px-3 py-2 rounded-xl border bg-white">Cancel</button>
+          <button type="submit" class="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700">Save</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+  /* --- Simple data layer (localStorage) --- */
+  const STORAGE_KEY = 'book-tracker:v1';
+  const demoBooks = [
+    { id: crypto.randomUUID(), title: 'Fourth Wing', author: 'Rebecca Yarros', status: 'Completed', rating: 5, pages: 517, percentRead: 100, dateFinished: '2025-05-26', tags: ['romantasy','audiobook'], notes:'', updatedAt: Date.now()-1000*60*60*24*7 },
+    { id: crypto.randomUUID(), title: 'Iron Flame', author: 'Rebecca Yarros', status: 'Reading', rating: null, pages: 640, percentRead: 64, dateStarted: '2025-05-29', tags: ['romantasy'], notes:'', updatedAt: Date.now()-1000*60*60*3 },
+    { id: crypto.randomUUID(), title: 'Brief Encounter', author: 'Noël Coward', status: 'To Read', rating: null, pages: 128, percentRead: 0, tags: ['classic'], notes:'', updatedAt: Date.now()-1000*60*60*24*3 }
+  ];
+
+  function loadBooks() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return demoBooks;
+    try { const data = JSON.parse(raw); return Array.isArray(data) ? data : demoBooks; } catch { return demoBooks; }
+  }
+  function saveBooks(list) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  }
+
+  /* --- DOM helpers --- */
+  const $ = (s, el=document) => el.querySelector(s);
+  const $$ = (s, el=document) => [...el.querySelectorAll(s)];
+
+  /* --- State --- */
+  let books = loadBooks();
+  let editingId = null;
+
+  const rowsEl = $('#rows');
+  const emptyState = $('#emptyState');
+  const searchEl = $('#search');
+  const statusFilterEl = $('#statusFilter');
+  const tagFilterEl = $('#tagFilter');
+  const sortByEl = $('#sortBy');
+
+  function uniqueTags() {
+    const set = new Set();
+    books.forEach(b => (b.tags||[]).forEach(t => set.add(t)));
+    return [''].concat([...set].sort());
+  }
+
+  function renderTagOptions() {
+    const opts = uniqueTags().map(t => `<option value="${t}">${t || 'All'}</option>`).join('');
+    tagFilterEl.innerHTML = opts;
+  }
+
+  function matchesFilters(b) {
+    const q = searchEl.value.trim().toLowerCase();
+    const inSearch = !q || [b.title,b.author,(b.tags||[]).join(',')].join(' ').toLowerCase().includes(q);
+    const statusOk = !statusFilterEl.value || b.status === statusFilterEl.value;
+    const tagOk = !tagFilterEl.value || (b.tags||[]).includes(tagFilterEl.value);
+    return inSearch && statusOk && tagOk;
+  }
+
+  function sortBooks(list){
+    const key = sortByEl.value;
+    const desc = key.startsWith('-');
+    const k = desc ? key.slice(1) : key;
+    return list.slice().sort((a,b)=>{
+      const av = a[k] ?? '';
+      const bv = b[k] ?? '';
+      if (typeof av === 'number' && typeof bv === 'number') return desc ? bv-av : av-bv;
+      return desc ? String(bv).localeCompare(String(av)) : String(av).localeCompare(String(bv));
+    });
+  }
+
+  function fmtStars(r){
+    if (r == null || r === '') return '—';
+    const full = Math.floor(r);
+    const half = r % 1 ? '⯪' : '';
+    return '★'.repeat(full) + half + '☆'.repeat(Math.max(0,5-full-(half?1:0)));
+  }
+
+  function render() {
+    renderTagOptions();
+    const filtered = books.filter(matchesFilters);
+    const sorted = sortBooks(filtered);
+
+    rowsEl.innerHTML = sorted.map(b => {
+      const pct = Math.max(0, Math.min(100, Number(b.percentRead||0)));
+      return `
+        <tr class="hover:bg-slate-50">
+          <td class="p-3">
+            <div class="font-medium">${b.title||''}</div>
+            <div class="text-xs text-slate-500">${b.dateFinished?`Finished ${b.dateFinished}`: b.dateStarted?`Started ${b.dateStarted}`:''}</div>
+          </td>
+          <td class="p-3">${b.author||''}</td>
+          <td class="p-3">
+            <span class="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs border">
+              ${b.status||'To Read'}
+            </span>
+          </td>
+          <td class="p-3 whitespace-nowrap">${fmtStars(b.rating)}</td>
+          <td class="p-3">${b.pages||'—'}</td>
+          <td class="p-3 min-w-[180px]">
+            <div class="progress"><div style="width:${pct}%"></div></div>
+            <div class="text-xs text-slate-500 mt-1">${pct}%</div>
+          </td>
+          <td class="p-3">${(b.tags||[]).join(', ')}</td>
+          <td class="p-3 text-right">
+            <button data-id="${b.id}" class="editBtn text-blue-600 hover:underline mr-3">Edit</button>
+            <button data-id="${b.id}" class="quickProgress text-slate-600 hover:underline">+10%</button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    emptyState.classList.toggle('hidden', sorted.length !== 0);
+    // Hook edit buttons
+    $$('.editBtn').forEach(btn => btn.addEventListener('click', onEditClick));
+    $$('.quickProgress').forEach(btn => btn.addEventListener('click', onQuickProgress));
+  }
+
+  function upsert(book){
+    const idx = books.findIndex(b => b.id === book.id);
+    book.updatedAt = Date.now();
+    if (idx === -1) books.push(book); else books[idx] = book;
+    saveBooks(books);
+    render();
+  }
+
+  function remove(id){
+    books = books.filter(b => b.id !== id);
+    saveBooks(books);
+    render();
+  }
+
+  /* --- Dialog/Edit --- */
+  const dialog = $('#bookDialog');
+  const form = $('#bookForm');
+  const deleteBtn = $('#deleteBtn');
+  const dialogTitle = $('#dialogTitle');
+  $('#addBtn').addEventListener('click', () => openDialog());
+  $('#closeDialog').addEventListener('click', () => dialog.close());
+  $('#cancelBtn').addEventListener('click', () => dialog.close());
+
+  function openDialog(book){
+    dialogTitle.textContent = book ? 'Edit book' : 'Add book';
+    deleteBtn.classList.toggle('hidden', !book);
+    editingId = book?.id || null;
+    form.reset();
+    // Prefill
+    ['title','author','status','rating','pages','percentRead','dateStarted','dateFinished','notes'].forEach(k=>{
+      if (book && book[k] != null) form.elements[k].value = book[k];
+    });
+    form.elements['tags'].value = (book?.tags||[]).join(', ');
+    dialog.showModal();
+  }
+
+  function onEditClick(e){
+    const id = e.currentTarget.dataset.id;
+    const b = books.find(x => x.id === id);
+    if (b) openDialog(b);
+  }
+
+  function onQuickProgress(e){
+    const id = e.currentTarget.dataset.id;
+    const b = books.find(x => x.id === id);
+    if (!b) return;
+    const val = Math.min(100, Number(b.percentRead||0) + 10);
+    upsert({ ...b, percentRead: val });
+  }
+
+  deleteBtn.addEventListener('click', () => {
+    if (!editingId) return;
+    remove(editingId);
+    dialog.close();
+  });
+
+  form.addEventListener('submit', (e)=>{
+    e.preventDefault();
+    const fd = new FormData(form);
+    const data = Object.fromEntries(fd.entries());
+    const book = {
+      id: editingId || crypto.randomUUID(),
+      title: data.title?.trim(),
+      author: data.author?.trim() || '',
+      status: data.status || 'To Read',
+      rating: data.rating ? Number(data.rating) : null,
+      pages: data.pages ? Number(data.pages) : null,
+      percentRead: data.percentRead ? Number(data.percentRead) : 0,
+      dateStarted: data.dateStarted || undefined,
+      dateFinished: data.dateFinished || undefined,
+      tags: data.tags ? data.tags.split(',').map(s=>s.trim()).filter(Boolean) : [],
+      notes: data.notes || ''
+    };
+    upsert(book);
+    dialog.close();
+  });
+
+  /* --- Filters/Sort/Search --- */
+  [searchEl, statusFilterEl, tagFilterEl, sortByEl].forEach(el => el.addEventListener('input', render));
+
+  /* --- Import/Export/Reset --- */
+  $('#exportBtn').addEventListener('click', ()=>{
+    const blob = new Blob([JSON.stringify(books, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'books.json'; a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  $('#importInput').addEventListener('change', async (e)=>{
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!Array.isArray(data)) throw new Error('Invalid JSON format');
+      // Ensure IDs
+      books = data.map(b => ({ id: b.id || crypto.randomUUID(), updatedAt: Date.now(), ...b }));
+      saveBooks(books);
+      render();
+    } catch (err) {
+      alert('Import failed: ' + err.message);
+    } finally {
+      e.target.value = '';
+    }
+  });
+
+  $('#resetBtn').addEventListener('click', ()=>{
+    if (!confirm('Replace your current list with demo data?')) return;
+    books = loadBooks() ? demoBooks : demoBooks; // just reset
+    saveBooks(books);
+    render();
+  });
+
+  // Initial render
+  render();
+  </script>
+</body>
+</html>
 
